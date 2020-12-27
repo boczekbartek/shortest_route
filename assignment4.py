@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import operator
 import matplotlib.pyplot as plt
@@ -143,10 +144,11 @@ def value_iteration(start, goal, M, plot=False):
                     V_sum.append(r[i, j] + gamma * M[i, j, get_direction([i, j], neigbour)] * V_tmp[neigbour[0], neigbour[1]])
                 V_tmp[i][j] = max(V_sum)
         V = V_tmp.copy()
-
+   
     if plot: 
         plt.imshow(V)
         plt.title("Heatmap of V matrix")
+        os.makedirs('img', exist_ok=True)
         plt.savefig("img/V_heatmap")
         plt.show()
 
