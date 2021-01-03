@@ -3,6 +3,7 @@ import numpy as np
 import operator
 import matplotlib.pyplot as plt
 from itertools import product
+from tqdm import tqdm
 
 
 class actions:
@@ -42,7 +43,7 @@ def find_best_move_simple(current_pos, goal, M):
         travel time
     """
     trvl_time = 0
-
+    steps = 0
     while current_pos != goal:
         # potential moves
         moves_x = goal[0] - current_pos[0]
@@ -90,10 +91,10 @@ def find_best_move_simple(current_pos, goal, M):
             current_pos[0] -= 1
         else:
             current_pos[1] -= 1
-
+        steps += 1
         # updating the travel time
         trvl_time += prob_to_exp_trvl_time(max(possible_moves))
-    return trvl_time
+    return trvl_time, steps
 
 
 def dijkstra(start, goal, M):
@@ -169,7 +170,8 @@ def value_iteration(start, goal, M, plot=False):
 
     # how many steps for value iteration - this might be enough when starting in (0, 0) and going to (1, 10). When the whole matrix is used, we might
     # have to increase the steps
-    for _ in range(100):
+    it = 0
+    while True:
         for i in range(len(V)):
             for j in range(len(V)):
                 V_sum = []
@@ -183,6 +185,11 @@ def value_iteration(start, goal, M, plot=False):
                         * V_tmp[neigbour[0], neigbour[1]]
                     )
                 V_tmp[i][j] = max(V_sum)
+        it += 1
+        if np.sum(np.abs(V - V_tmp)) < 1e-13:
+            print("Value iterations iters =", it)
+            break
+
         V = V_tmp.copy()
 
     if plot:
@@ -190,11 +197,11 @@ def value_iteration(start, goal, M, plot=False):
         plt.title("Heatmap of V matrix")
         os.makedirs("img", exist_ok=True)
         plt.savefig("img/V_heatmap")
-        plt.show()
 
     # Value iteration done, now choose the optimal path through the matrix
     travel_time = 0
     current_pos = start
+    steps = 0
     for i in range(100):
         moves = []
 
@@ -214,12 +221,12 @@ def value_iteration(start, goal, M, plot=False):
             ]
         )
         current_pos = neigbours_list[np.argmax(moves)]
-
+        steps += 1
         # goal has been reached
         if convert(current_pos) == goal:
             break
 
-    return travel_time
+    return travel_time, steps
 
 
 def prob_to_exp_trvl_time(prob):
@@ -289,19 +296,22 @@ if __name__ == "__main__":
     gamma = 0.99
 
     r[1][10] = 1
-
-    # Generate transition matrix with congestion probabilities
-    for i in range(len(M)):
-        for j in range(len(M)):
-            for k in range(M.shape[2]):
-                M[i][j][k] = np.random.choice(np.arange(0.1, 1.1, 0.1))
-    np.save("M.npy", M)
+    if os.path.exists("M.npy"):
+        M = np.load("M.npy")
+    else:
+        # Generate transition matrix with congestion probabilities
+        for i in range(len(M)):
+            for j in range(len(M)):
+                for k in range(M.shape[2]):
+                    M[i][j][k] = np.random.choice(np.arange(0.1, 1.1, 0.1))
+        np.save("M.npy", M)
 
     # Simple heuristic - take the shortest path to (1,10)
     current_pos = [0, 0]
-    exp_trvl_time_heuristic = find_best_move_simple(current_pos, goal, M)
+    exp_trvl_time_heuristic, steps = find_best_move_simple(current_pos, goal, M)
     print(
-        "Expected travel time for simple heuristic is: \t%d" % (exp_trvl_time_heuristic)
+        "Expected travel time for simple heuristic is: \t%d in %d steps"
+        % (exp_trvl_time_heuristic, steps)
     )
 
     # Set of equations, aka Dijkstra
@@ -311,9 +321,11 @@ if __name__ == "__main__":
 
     # Dynamic Programming, aka value iteration
     current_pos = (0, 0)
-    exp_trvl_time_value_iteration = value_iteration(current_pos, convert(goal), M, True)
+    exp_trvl_time_value_iteration, steps = value_iteration(
+        current_pos, convert(goal), M, True
+    )
     print(
-        "Expected travel time in Value Iteration is: \t%d"
-        % (exp_trvl_time_value_iteration)
+        "Expected travel time in Value Iteration is: \t%d in %d steps"
+        % (exp_trvl_time_value_iteration, steps)
     )
 
