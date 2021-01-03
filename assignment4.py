@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import operator
+import seaborn as sns
 import matplotlib.pyplot as plt
 from itertools import product
 from tqdm import tqdm
@@ -193,8 +194,11 @@ def value_iteration(start, goal, M, plot=False):
         V = V_tmp.copy()
 
     if plot:
-        plt.imshow(V)
+        plt.figure()
+        sns.heatmap(V, square=True)
         plt.title("Heatmap of V matrix")
+        plt.xlabel("y")
+        plt.ylabel("x")
         os.makedirs("img", exist_ok=True)
         plt.savefig("img/V_heatmap")
 

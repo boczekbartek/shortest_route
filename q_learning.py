@@ -34,7 +34,9 @@ if USE_DIST:
     for x in range(50):
         for y in range(50):
             dist = np.sqrt((x - xg) * (x - xg) + (y - yg) * (y - yg))
-            reward_fun[x, y] = -0.00816 * dist + -0.091
+            reward_fun[x, y] = (
+                -0.00816 * dist + -0.091
+            )  # scale negative rewards from ~(-0.1:-0.5)
 reward_fun[goal] = goal_reward
 
 # Generate transition matrix with congestion probabilities
@@ -49,8 +51,6 @@ else:
     np.save("M.npy", M)
 
 # Transition matrix with 3 dimensions. x,y is grid, z is transitions. dim0 = north, dim1 = east, dim2 = south, dim3 = west
-
-
 @nb.njit(cache=True)
 def make_step_congest(x: int, y: int, action: int):
     """ 
@@ -125,12 +125,9 @@ def do_episode(ini_x, ini_y, exploration_rate, q_table):
         new_state = np.array([nx, ny])
         reward = reward_fun[x, y] if nx == x and ny == y else reward_fun[nx, ny]
 
-        if nx == x and ny == y:
-            pass
-        else:
-            q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
-                reward + discount_rate * np.max(q_table[nx, ny, :])
-            )
+        q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
+            reward + discount_rate * np.max(q_table[nx, ny, :])
+        )
 
         rewards_cur_episode += reward
         steps += 1
@@ -235,18 +232,18 @@ def save_plots(rewards_all_episodes, travel_times, q_table):
     n, e, s, w = [q_table[:, :, i] for i in (0, 1, 2, 3)]
     for action, name in zip((n, e, s, w), "NESW"):
         plt.figure()
-        sns.heatmap(action.T, square=True)
+        sns.heatmap(action, square=True)
         plt.title(f"Q-table {name}")
-        plt.xlabel("x")
         plt.xlabel("y")
+        plt.ylabel("x")
         os.makedirs("img", exist_ok=True)
         plt.savefig(f"img/q_table-{name}" + suf)
 
     q_table_cum = np.sum(q_table, axis=2)
     plt.figure()
-    sns.heatmap(q_table_cum.T, square=True)
-    plt.xlabel("x")
+    sns.heatmap(q_table_cum, square=True)
     plt.xlabel("y")
+    plt.ylabel("x")
 
     plt.title(f"Q-table cum")
     os.makedirs("img", exist_ok=True)
@@ -283,7 +280,9 @@ def save_plots(rewards_all_episodes, travel_times, q_table):
     n, e, s, w = [M[:, :, i] for i in (0, 1, 2, 3)]
     for action, name in zip((n, e, s, w), "NESW"):
         plt.figure()
-        sns.heatmap(action.T, square=True)
+        sns.heatmap(action, square=True)
+        plt.xlabel("y")
+        plt.ylabel("x")
         plt.title(f"Congestion prob {name}")
         os.makedirs("img", exist_ok=True)
         plt.savefig(f"img/M-{name}" + suf)
@@ -301,9 +300,9 @@ def save_plots(rewards_all_episodes, travel_times, q_table):
     plt.savefig("img/eps" + suf)
 
     plt.figure()
-    sns.heatmap(reward_fun.T, square=True)
-    plt.xlabel("x")
-    plt.ylabel("y")
+    sns.heatmap(reward_fun, square=True)
+    plt.xlabel("y")
+    plt.ylabel("x")
     plt.title("Reward")
     plt.savefig("img/reward_fun" + suf)
 
