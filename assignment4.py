@@ -295,6 +295,7 @@ if __name__ == "__main__":
         for j in range(len(M)):
             for k in range(M.shape[2]):
                 M[i][j][k] = np.random.choice(np.arange(0.1, 1.1, 0.1))
+    np.save("M.npy", M)
 
     # Simple heuristic - take the shortest path to (1,10)
     current_pos = [0, 0]
