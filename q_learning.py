@@ -1,11 +1,11 @@
 import os
+from pickle import TRUE
 import time
 
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numba as nb
-from assignment4 import actions, prob_to_exp_trvl_time
 
 goal = (1, 10)
 current_pos = (0, 0)
@@ -14,7 +14,6 @@ n_states_x = 50
 n_states_y = 50
 n_actions = 4
 goal_reward = 1
-congestion_reward = 0
 max_steps_per_epidode = 1000
 move_reward = 0
 # move_reward = -(goal_reward / max_steps_per_epidode)
@@ -23,12 +22,20 @@ n_episodes = 10000
 lr = 0.1
 discount_rate = 0.99
 
-max_exploration_rate = 1
+max_exploration_rate = 1.0
 min_exploration_rate = 0.01
 exploration_decay_rate = 1.0 / n_episodes
+USE_DIST = True
 
-r = np.ones((n_states_x, n_states_y), dtype=np.float64) * move_reward
-r[goal] = goal_reward
+reward_fun = np.ones((n_states_x, n_states_y), dtype=np.float64) * move_reward
+
+if USE_DIST:
+    xg, yg = goal
+    for x in range(50):
+        for y in range(50):
+            dist = np.sqrt((x - xg) * (x - xg) + (y - yg) * (y - yg))
+            reward_fun[x, y] = -0.00816 * dist + -0.091
+reward_fun[goal] = goal_reward
 
 # Generate transition matrix with congestion probabilities
 if os.path.exists("M.npy"):
@@ -116,11 +123,14 @@ def do_episode(ini_x, ini_y, exploration_rate, q_table):
 
         nx, ny = make_step_congest(x, y, action)
         new_state = np.array([nx, ny])
-        reward = congestion_reward if nx == x and ny == y else r[nx, ny]
+        reward = reward_fun[x, y] if nx == x and ny == y else reward_fun[nx, ny]
 
-        q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
-            reward + discount_rate * np.max(q_table[nx, ny, :])
-        )
+        if nx == x and ny == y:
+            pass
+        else:
+            q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
+                reward + discount_rate * np.max(q_table[nx, ny, :])
+            )
 
         rewards_cur_episode += reward
         steps += 1
@@ -135,6 +145,32 @@ def do_episode(ini_x, ini_y, exploration_rate, q_table):
 
 
 @nb.njit(cache=True)
+def count_expected_time(q_table, xs, ys, xg, yg, debug=False):
+    travel_time = 0
+    current_pos = (xs, ys)
+    g = (xg, yg)
+    steps = 0
+    d = {0: "N", 1: "E", 2: "S", 3: "W"}
+    for _ in range(1000):
+        x, y = current_pos
+        state_q = q_table[x, y, :]
+        action = np.argmax(state_q)
+        next_state = make_step(x, y, action)
+        if debug:
+            print(current_pos, "Q =", state_q, "A =", d[action], "->", next_state)
+        # update the travel time
+        prob = M[current_pos[0], current_pos[1], action]
+        travel_time += ((1 - prob) * 10) + 1
+        current_pos = next_state
+        steps += 1
+        # goal has been reached
+        if current_pos == g:
+            break
+
+    return travel_time, steps
+
+
+@nb.njit(cache=True)
 def q_learning():
     q_table = np.zeros((n_states_x, n_states_y, n_actions))
     q_table[n_states_x - 1, :, 1] = np.NINF
@@ -146,8 +182,12 @@ def q_learning():
     rewards_all_episodes = np.zeros(n_episodes, dtype=np.float64)
     travel_times = np.zeros(n_episodes, dtype=np.int64)
 
+    avg_R = 0
+    episode = 0
+    # while avg_R < 100:
     for episode in range(n_episodes):
         x, y = np.random.randint(0, n_states_x - 1, size=2)
+        # x, y = (0, 0)
         steps, rewards_cur_episode = do_episode(x, y, exploration_rate, q_table)
         travel_times[episode] = steps
         rewards_all_episodes[episode] = rewards_cur_episode
@@ -155,21 +195,32 @@ def q_learning():
         exploration_rate = get_explotation_rate(
             min_exploration_rate, max_exploration_rate, exploration_decay_rate, episode
         )
+        if episode <= 100:
+            avg_R = 0  # don't take average into account yet
+            avg_S = 0
+        else:
+            avg_R = np.sum(rewards_all_episodes[episode - 100 : episode]) / 100
+            avg_S = np.sum(travel_times[episode - 100 : episode]) / 100
+        exp, stp = count_expected_time(q_table, 0, 0, 1, 10)
 
-        # print(
-        #     "Episode:",
-        #     episode,
-        #     "| eps =",
-        #     exploration_rate,
-        #     "| R =",
-        #     round(rewards_cur_episode, 2),
-        #     "| S =",
-        #     steps,
-        #     "| avg_R =",
-        #     round(np.sum(rewards_all_episodes) / (episode + 1), 4),
-        #     "| avg_S =",
-        #     round(np.sum(travel_times) / (episode + 1), 4),
-        # )
+        print(
+            "Episode:",
+            episode,
+            "| eps =",
+            exploration_rate,
+            "| R =",
+            round(rewards_cur_episode, 2),
+            "| exp =",
+            exp,
+            "| exp_S =",
+            stp,
+            "| S =",
+            steps,
+            "| avg_R =",
+            round(avg_R, 4),
+            "| avg_S =",
+            round(avg_S, 4),
+        )
 
     return rewards_all_episodes, travel_times, q_table
 
@@ -178,53 +229,28 @@ def rolling_average(x, w):
     return np.convolve(x, np.ones(w), "valid") / w
 
 
-def translate(action):
-    if action == actions.north:
-        return "N"
-    if action == actions.south:
-        return "S"
-    if action == actions.west:
-        return "W"
-    if action == actions.east:
-        return "E"
-
-
-def count_expected_time(q_table, start, goal):
-    travel_time = 0
-    current_pos = start
-    for _ in range(1000):
-        x, y = current_pos
-        state_q = q_table[x, y, :]
-        action = np.argmax(state_q)
-        next_state = make_step(x, y, action)
-
-        # print(f"{current_pos}, Q={state_q}, A={translate(action)} -> {next_state}")
-        # update the travel time
-        travel_time += prob_to_exp_trvl_time(M[current_pos[0], current_pos[1], action])
-        current_pos = next_state
-
-        # goal has been reached
-        if current_pos == goal:
-            break
-
-    return travel_time
-
-
 def save_plots(rewards_all_episodes, travel_times, q_table):
+    suf = "_dist" if USE_DIST == True else ""
+
     n, e, s, w = [q_table[:, :, i] for i in (0, 1, 2, 3)]
     for action, name in zip((n, e, s, w), "NESW"):
         plt.figure()
         sns.heatmap(action.T, square=True)
         plt.title(f"Q-table {name}")
+        plt.xlabel("x")
+        plt.xlabel("y")
         os.makedirs("img", exist_ok=True)
-        plt.savefig(f"img/q_table-{name}")
+        plt.savefig(f"img/q_table-{name}" + suf)
 
     q_table_cum = np.sum(q_table, axis=2)
     plt.figure()
     sns.heatmap(q_table_cum.T, square=True)
+    plt.xlabel("x")
+    plt.xlabel("y")
+
     plt.title(f"Q-table cum")
     os.makedirs("img", exist_ok=True)
-    plt.savefig(f"img/q_table-cum")
+    plt.savefig(f"img/q_table-cum" + suf)
 
     spl = n_episodes / 10
     reward_per_thousand_episodes = np.split(
@@ -232,40 +258,69 @@ def save_plots(rewards_all_episodes, travel_times, q_table):
     )
     times_per_thousand_episodes = np.split(np.array(travel_times), n_episodes / spl)
     cnt = spl
-    print(f"\n********** Average stats per {spl} episodes ***********")
     print("Iters :       avg reward     | avg steps to goal")
     for r, tr in zip(reward_per_thousand_episodes, times_per_thousand_episodes):
         print(cnt, ": ", str(sum(r / spl)), "|", str(sum(tr / spl)))
         cnt += spl
 
     plt.figure()
-    plt.plot(rolling_average(travel_times, 100))
-    plt.title("Travel time rolling average from 100 episodes")
+    plt.plot(rolling_average(travel_times, 50))
+    plt.title("Travel time rolling average from 50 episodes")
+    plt.xlabel("Episode")
+    plt.ylabel("50-avg travel time")
+
     os.makedirs("img", exist_ok=True)
-    plt.savefig("img/travel_time")
+    plt.savefig("img/travel_time" + suf)
 
     plt.figure()
-    plt.plot(rolling_average(rewards_all_episodes, 100))
-    plt.title("Reward rolling average from 100 episodes")
-    os.makedirs("img", exist_ok=True)
-    plt.savefig("img/reward")
+    plt.plot(rolling_average(rewards_all_episodes, 50))
+    plt.title("Reward rolling average from 50 episodes")
+    plt.xlabel("Episode")
+    plt.ylabel("50-avg reward")
 
+    os.makedirs("img", exist_ok=True)
+    plt.savefig("img/reward" + suf)
     n, e, s, w = [M[:, :, i] for i in (0, 1, 2, 3)]
     for action, name in zip((n, e, s, w), "NESW"):
         plt.figure()
         sns.heatmap(action.T, square=True)
         plt.title(f"Congestion prob {name}")
         os.makedirs("img", exist_ok=True)
-        plt.savefig(f"img/M-{name}")
+        plt.savefig(f"img/M-{name}" + suf)
+
+    eps = [
+        get_explotation_rate(
+            min_exploration_rate, max_exploration_rate, exploration_decay_rate, i
+        )
+        for i in range(n_episodes)
+    ]
+    plt.figure()
+    plt.title("Exploration rate")
+    plt.plot(eps)
+    plt.xlabel("Episode")
+    plt.savefig("img/eps" + suf)
+
+    plt.figure()
+    sns.heatmap(reward_fun.T, square=True)
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("Reward")
+    plt.savefig("img/reward_fun" + suf)
 
 
 if __name__ == "__main__":
     # ts = time.time()
     rewards_all_episodes, travel_times, q_table = q_learning()
     # print(f"Q-learning finished in: {time.time() - ts}")
-    exp_trvl_time_q_lrn = count_expected_time(q_table, (0, 0), goal)
-    print("Expected travel time for Q-learning is: \t%d" % (exp_trvl_time_q_lrn))
+    exp_trvl_time_q_lrn, stp = count_expected_time(
+        q_table, 0, 0, goal[0], goal[1], debug=True
+    )
+    print(
+        "Expected travel time for Q-learning is: \t%d in %d steps"
+        % (exp_trvl_time_q_lrn, stp)
+    )
 
     np.save("q-table.npy", q_table)
 
     save_plots(rewards_all_episodes, travel_times, q_table)
+
